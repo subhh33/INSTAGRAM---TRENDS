@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Instagram Performance Analyzer</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    h1 { color: #333; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    th { background-color: #f2f2f2; }
+    .error { color: red; }
+  </style>
+  <!-- Include Papa Parse for CSV parsing -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.1/papaparse.min.js"></script>
+</head>
+<body>
+  <h1>Instagram Performance Analyzer</h1>
+  <p>Upload a CSV file containing your Instagram data (columns: Post, Likes, Comments, Followers, Hashtags, Timestamp).</p>
+  <input type="file" id="fileInput" accept=".csv">
+  <p id="error" class="error"></p>
+  <div id="results"></div>
+
+  <script>
+  // Trending/niche hashtags sets based on 2025 Metricool trends
+  const trendingSet = new Set([
+    // Art
+    'art','artist','artwork','nailart','digitalart','arte','instaart','artistsoninstagram',
+    'streetart','artoftheday','contemporaryart','fanart','artofvisuals','artsy','abstractart',
+    'fineart','artgallery','instaartist','arts','myart','artistic','modernart','animeart',
+    'picsart','tattooart','nailsart','artists','urbanart','artistsofinstagram',
+    // Pets
+    'pet','pets','petstagram','petsofinstagram','instapet','petsagram','petlovers',
+    'instapets','petshop','mypet','petphotography','petlove','cutepets','petfriendly',
+    'petscorner','petportrait','ilovemypet','happy_pet','petsofinsta','picpets','lovepets',
+    'nationalpetday','worldofcutepets','petsmart','petsitting','petlife','petsgram','petgrooming',
+    'petofinstagram',
+    // Travel
+    'travel','travelgram','travelphotography','instatravel','traveling','travelling','travelblogger',
+    'traveler','traveller','traveltheworld','igtravel','travelingram','travelblog','mytravelgram',
+    'travels','instatraveling','traveladdict','travelphoto','traveldiaries','travelawesome',
+    'wanderlust','wanderlusting','wanderluster','wanderlusters','wanderlustwednesday','visualwanderlust',
+    'wanderlustlife','asianwanderlust','wanderlustvibes','travellife'
+  ]);
+
+  // Helper function to create HTML table from array of objects
+  function createTable(data, columns) {
+    let html = '<table><thead><tr>';
+    columns.forEach(col => { html += `<th>${col}</th>`; });
+    html += '</tr></thead><tbody>';
+    data.forEach(row => {
+      html += '<tr>';
+      columns.forEach(col => {
+        html += `<td>${row[col]}</td>`;
+      });
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    return html;
+  }
+
+  // Function to handle file upload and analysis
+  document.getElementById('fileInput').addEventListener('change', function(event) {
+    const file = event.target.files[0];
+    const errorElem = document.getElementById('error');
+    const resultsDiv = document.getElementById('results');
+    errorElem.textContent = '';
+    resultsDiv.innerHTML = '';
+    if (!file) {
+      errorElem.textContent = 'Please select a CSV file.';
+      return;
+    }
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: function(results) {
+        // Validate required columns
+        const required = ['Post','Likes','Comments','Followers','Hashtags','Timestamp'];
+        const missing = required.filter(col => !results.meta.fields.includes(col));
+        if (missing.length > 0) {
+          errorElem.textContent = 'Missing columns: ' + missing.join(', ');
+          return;
+        }
+        const data = results.data;
+        // Parse and compute
+        try {
+          analyzeData(data);
+        } catch (err) {
+          errorElem.textContent = 'Error processing data: ' + err.message;
+        }
+      },
+      error: function(err) {
+        errorElem.textContent = 'Failed to parse CSV: ' + err;
+      }
+    });
+  });
+
+  function analyzeData(data) {
+    // Convert numeric fields and parse timestamps, hashtags
+    const processed = data.map(item => {
+      const likes = parseFloat(item['Likes']);
+      const comments = parseFloat(item['Comments']);
+      const followers = parseFloat(item['Followers']);
+      const hashtags = (item['Hashtags'] || '').split(',').map(h => h.trim().toLowerCase()).filter(h => h);
+      const timestamp = new Date(item['Timestamp']);
+      const engagementRate = followers > 0 ? (likes + comments) / followers : 0;
+      return {
+        Post: item['Post'],
+        Likes: likes,
+        Comments: comments,
+        Followers: followers,
+        Hashtags: hashtags,
+        Timestamp: timestamp,
+        EngagementRate: engagementRate
+      };
+    });
+    // Engagement table
+    const engagementTableData = processed.map(p => ({
+      Post: p.Post,
+      Likes: p.Likes,
+      Comments: p.Comments,
+      Followers: p.Followers,
+      EngagementRate: p.EngagementRate.toFixed(4)
+    }));
+    // Top posts by engagement
+    const topPosts = [...processed].sort((a,b) => b.EngagementRate - a.EngagementRate).slice(0, 5);
+    // Hashtag frequency
+    const tagCounts = {};
+    processed.forEach(p => {
+      p.Hashtags.forEach(tag => {
+        tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+      });
+    });
+    const tagTableData = Object.keys(tagCounts).map(tag => ({Hashtag: '#' + tag, Count: tagCounts[tag]})).sort((a,b) => b.Count - a.Count);
+    // Hourly engagement
+    const hourMap = {};
+    processed.forEach(p => {
+      const hour = p.Timestamp.getHours();
+      if (!hourMap[hour]) hourMap[hour] = { totalEngagement: 0, count: 0 };
+      hourMap[hour].totalEngagement += p.EngagementRate;
+      hourMap[hour].count += 1;
+    });
+    const hourlyTableData = Object.keys(hourMap).map(h => ({
+      Hour: h.padStart(2, '0'),
+      AverageEngagementRate: (hourMap[h].totalEngagement / hourMap[h].count).toFixed(4)
+    })).sort((a,b) => parseFloat(b.AverageEngagementRate) - parseFloat(a.AverageEngagementRate));
+    // QC suggestions
+    const qcData = processed.map(p => {
+      const caption = p.Post;
+      const words = caption.replace(/#\w+/g, '').replace(/[^\w\s\.\!\?]/g,'').match(/\b\w+\b/g) || [];
+      const sentences = caption.replace(/#\w+/g, '').split(/[\.!?]+/).filter(s => s.trim());
+      const wordCount = words.length;
+      const sentenceCount = sentences.length;
+      const avgSentenceLength = sentenceCount ? (wordCount / sentenceCount) : 0;
+      const trendingUsed = p.Hashtags.filter(h => trendingSet.has(h));
+      const suggestions = [];
+      if (wordCount > 40) suggestions.push('Consider shortening the caption.');
+      if (avgSentenceLength > 20) suggestions.push('Break long sentences into shorter ones.');
+      if (p.Hashtags.length > 5) suggestions.push('Use 3–5 hashtags per post (Instagram recommendation).');
+      if (trendingUsed.length === 0) suggestions.push('Add trending or niche‑specific hashtags to increase reach.');
+      if (p.Hashtags.length < 2) suggestions.push('Use at least a couple of relevant hashtags.');
+      return {
+        Post: caption,
+        word_count: wordCount,
+        sentence_count: sentenceCount,
+        avg_sentence_length: avgSentenceLength.toFixed(2),
+        hashtag_count: p.Hashtags.length,
+        trending_hashtags_used: trendingUsed.length ? trendingUsed.join(', ') : 'None',
+        suggestions: suggestions.length ? suggestions.join('; ') : 'None'
+      };
+    });
+    // Build result HTML
+    let html = '';
+    html += '<h2>Original posts with engagement rates</h2>';
+    html += createTable(engagementTableData, ['Post','Likes','Comments','Followers','EngagementRate']);
+    html += '<h2>Top posts by engagement</h2><ol>';
+    topPosts.forEach(tp => {
+      html += `<li><strong>${tp.EngagementRate.toFixed(4)}</strong> – ${tp.Post.substring(0,80)}${tp.Post.length>80?'...':''}</li>`;
+    });
+    html += '</ol>';
+    html += '<h2>Hashtag usage frequency</h2>';
+    html += createTable(tagTableData, ['Hashtag','Count']);
+    html += '<h2>Average engagement rate by posting hour</h2>';
+    html += createTable(hourlyTableData, ['Hour','AverageEngagementRate']);
+    html += '<h2>Content quality suggestions</h2>';
+    html += createTable(qcData, ['Post','word_count','sentence_count','avg_sentence_length','hashtag_count','trending_hashtags_used','suggestions']);
+    document.getElementById('results').innerHTML = html;
+  }
+  </script>
+</body>
+</html>
